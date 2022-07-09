@@ -1,11 +1,10 @@
 from abc import ABC, abstractmethod
-from ast import List
 from collections import defaultdict, namedtuple
 from functools import cached_property
 from random import Random
+from typing import List, Tuple
 
-
-Sample = namedtuple('Dataset', ['sid', 'time', 'label'])
+Sample = namedtuple('Sample', ['sid', 'time', 'label'])
 
 merged_data = namedtuple('merged_data', ['accindex', 'array'])
 
@@ -59,15 +58,15 @@ class SurvivalDataset(ABC):
 
     def __len__(self):
         if self._testing:
-            return len(self.merged_data.array)
+            return len(self.merged_data.accindex) - 1
         else:
-            return len(self.merged_data.array)
+            return len(self.merged_data.accindex) - 1
 
     def _item_train(self, index):
         assert 0 <= index < len(self)
         records = self.merged_data.array[
-            self.merged_data.accindex[index]:
-            self.merged_data.accindex[index+1]]
+                  self.merged_data.accindex[index]:
+                  self.merged_data.accindex[index + 1]]
         # randomly sample tow records with replacement
         records = self._rnd.choices(records, k=2)
         return records
@@ -79,11 +78,11 @@ class SurvivalDataset(ABC):
         """
         assert 0 <= index < len(self)
         sample1 = index
-        sample2 = min(index+1, len(self)-1)
-        return [self.merged_data.array[sample1],
-                self.merged_data.array[sample2]]
+        sample2 = min(index + 1, len(self) - 1)
+        return [self.merged_data[1][sample1],
+                self.merged_data[1][sample2]]
 
-    def _handle_paired_sample(self, sample_pair: List[(Sample, int)]):
+    def _handle_paired_sample(self, sample_pair: List[Tuple[Sample, Sample]]):
         """
         generate the trainable data for the model given a pair of samples
         """
@@ -102,5 +101,3 @@ class SurvivalDataset(ABC):
         else:
             item = self._item_train(index)
         return self._handle_paired_sample(item)
-
-

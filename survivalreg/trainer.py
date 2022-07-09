@@ -40,6 +40,8 @@ class Trainer():
         print('running_uuid', self.running_uuid)
         print(self.cfg)
         self.epoch = None
+        if isinstance(self.label_coder, type):
+            self.label_coder = self.label_coder()
 
     def _get_cfg_recursive(self, cls=None):
         if cls is None:
@@ -75,9 +77,9 @@ class Trainer():
             backbone=self.cfg.model,
             output_size=len(self.label_coder))
         if self.cfg.load_pretrain:
+            print(f'load pretrain: {self.cfg.load_pretrain}')
             model.load_state_dict(torch.load(
                 self.cfg.load_pretrain, map_location='cpu'))
-            print(f'load pretrain: {self.cfg.load_pretrain}')
         return model
 
     @cached_property
@@ -95,7 +97,6 @@ class Trainer():
             batch_size=self.cfg.batch_size,
             shuffle=True,
             num_workers=self.cfg.num_workers,
-            persistent_workers=True
         )
         return loader
 
@@ -106,7 +107,6 @@ class Trainer():
             batch_size=self.cfg.batch_size,
             shuffle=False,
             num_workers=self.cfg.num_workers,
-            persistent_workers=True
         )
         return loader
 

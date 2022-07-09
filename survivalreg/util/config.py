@@ -19,7 +19,7 @@ class Parser(object):
         if hasattr(self, 'value'):
             return getattr(self, 'value')
         v = os.environ.get(self.name, self.default)
-        if self.type_ is not None:
+        if self.type_ is not None and self.name in os.environ:
             v = self.type_(v)
         setattr(self, 'value', v)
         return v
