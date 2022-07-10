@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Any
+
 import numpy as np
 import torch
 
@@ -19,13 +20,13 @@ class LabelCoderBaseClass(ABC):
 
 
 class RankLabelCoder(LabelCoderBaseClass):
-    def __init__(self, thresholds: List[float | int]):
+    def __init__(self, thresholds: List[Any]):
         self.n_classes = len(thresholds)
         self.thresholds = thresholds
 
     def code(self, label) -> List[bool]:
-        arr = np.array([label > t for t in self.thresholds])
-        return (arr.astype(np.float32) - 0.5) * 2
+        arr = torch.FloatTensor([label > t for t in self.thresholds])
+        return (arr.to(torch.float32) - 0.5) * 2
 
     def decode(self, code: List[float]):
         return code
@@ -39,8 +40,14 @@ class BinaryLabelCoder(LabelCoderBaseClass):
         pass
 
     def code(self, label) -> List[bool]:
-        label = bool(label)
-        code = (np.array([label]).astype(np.float32) - 0.5) * 2
+        if isinstance(label, list):
+            label = torch.Tensor(label)
+        if isinstance(label, torch.FloatTensor):
+            label = label > 0
+
+        code = (label.to(torch.float32) - 0.5) * 2
+        if len(code.shape) == 1:
+            code = code.view(-1, 1)
         return code
 
     def decode(self, code: List[bool]):
@@ -64,14 +71,17 @@ class LabelCoder:
     def __len__(self):
         return sum([len(c) for _, c in self.coders])
 
+    def __call__(self, *args, **kwargs):
+        return self.code(*args, **kwargs)
+
     def code(self, label) -> np.ndarray:
         collection = []
         for name, coder in self.coders:
             assert name in label
             collection.append(coder.code(label[name]))
-        return np.concatenate(collection)
+        return torch.cat(collection)
 
-    def decode(self, code: torch.Tensor | np.ndarray) -> dict:
+    def decode(self, code: torch.Tensor) -> dict:
         assert isinstance(code, torch.Tensor) or isinstance(code, np.ndarray)
         result = {}
         for i, (name, coder) in enumerate(self.coders):
@@ -80,10 +90,10 @@ class LabelCoder:
 
 
 if __name__ == '__main__':
-
     class TestCoder(LabelCoder):
         a = RankLabelCoder([0, 1, 2])
         b = BinaryLabelCoder()
+
 
     lc = TestCoder()
     print(lc.code({'a': 2, 'b': True}))

@@ -1,23 +1,23 @@
-import abc
 import json
 import os
 import pickle
 import time
-from ast import Dict
 from collections import defaultdict
 from functools import cached_property
+from typing import Dict
 
 import torch
-import torch.nn as nn
+from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, Dataset
 
 from .label_coder import LabelCoder
 from .model import ModelProgression
+from .tmloss import SURELoss
 from .util.config import Config, Parser
 
 
 class TrainerConfig(Config):
-    debug = Parser('debug', 'False',
+    debug = Parser('debug', False,
                    lambda x: not x.lower().startswith('f'), 'debug mode ')
     load_pretrain = Parser('load_pretrain', None, str, 'load pretrained model')
     batch_size = Parser('batch_size', 128, int, 'batch size')
@@ -30,7 +30,7 @@ class TrainerConfig(Config):
 
 
 class Trainer():
-    cfg = TrainerConfig
+    cfg = TrainerConfig()
     label_coder: LabelCoder = None
 
     def __init__(self) -> None:
@@ -42,6 +42,7 @@ class Trainer():
         self.epoch = None
         if isinstance(self.label_coder, type):
             self.label_coder = self.label_coder()
+        self._result_cache = None
 
     def _get_cfg_recursive(self, cls=None):
         if cls is None:
@@ -63,6 +64,10 @@ class Trainer():
             print(f'logger_dir: {logger_dir}')
         if not os.path.exists(logger_dir):
             os.makedirs(logger_dir)
+        if os.path.islink(f'logs/last'):
+            print('removing !!!')
+            os.remove('logs/last')
+        os.symlink(self.running_uuid, f'logs/last', )
         return logger_dir
 
     @cached_property
@@ -83,7 +88,7 @@ class Trainer():
         return model
 
     @cached_property
-    def train_dataset(self)->Dataset:
+    def train_dataset(self) -> Dataset:
         raise NotImplementedError
 
     @cached_property
@@ -125,7 +130,7 @@ class Trainer():
 
     @cached_property
     def criterion(self):
-        return nn.CrossEntropyLoss()
+        return SURELoss()
 
     @cached_property
     def scheduler(self):
@@ -135,32 +140,72 @@ class Trainer():
         self.optimizer.step()
         return sch
 
-    @abc.abstractmethod
-    def batch(self, epoch, ibatch, data) -> dict:
-        raise NotImplementedError
+    def batch(self, epoch, i_batch, data) -> dict:
+        x1, x2, l1, l2, dt = data
+        code_1 = self.label_coder(l1)
+        code_2 = self.label_coder(l2)
+        x1 = x1.to(torch.float32).to(self.device)
+        x2 = x2.to(torch.float32).to(self.device)
+        code_1 = code_1.to(torch.float32).to(self.device)
+        code_2 = code_2.to(torch.float32).to(self.device)
+        dt = dt.to(torch.float32).to(self.device)
+        y1 = self.model(x1)
+        y2 = self.model(x2)
+        loss = self.criterion(y1, y2, code_1, code_2, dt)
+        return dict(
+            loss=loss,
+            y1=y1,
+            y2=y2,
+            code_1=code_1,
+            code_2=code_2,
+            dt=dt,
+        )
 
-    @abc.abstractmethod
     def matrix(self, epoch, data) -> dict:
-        raise NotImplementedError
+        mean_loss = torch.mean(data['loss']).item()
+        n_auc = data['code_1'].size(1)
+        mat_dict = {'mean_loss': mean_loss}
+        pred = torch.cat([data['y1'], data['y2']])
+        label = torch.cat([data['code_1'], data['code_2']])
+        for i in range(n_auc):
+            try:
+                mat_dict[f'auc_{i}'] = roc_auc_score(label[:, i] > 0, pred[:, i])
+            except Exception as e:
+                print(e)
+        return mat_dict
+
+    def collect_result(self, output: Dict):
+        if self._result_cache is None:
+            self._result_cache = defaultdict(list)
+        for k, v in output.items():
+            self._result_cache[k].append(v.detach().cpu())
+
+    def merge_result(self):
+        collected = {}
+        for k, v in self._result_cache.items():
+            if len(v[0].shape) == 0:
+                collected[k] = torch.stack(v)
+            else:
+                collected[k] = torch.cat(v)
+        return collected
 
     def train(self):
         print(self.cfg, file=self.training_log)
+        print(self.scheduler)
+        print(self.optimizer)
         for epoch in range(self.cfg.epochs):
             self.epoch = epoch
             self.model.train()
             self.model.to(self.device)
-            outputs = defaultdict(list)
             for i_batch, batch_data in enumerate(self.train_loader):
                 self.optimizer.zero_grad()
                 output = self.batch(epoch, i_batch, batch_data)
-                loss = output.pop('loss')
+                loss = output['loss']
                 loss.backward()
                 self.optimizer.step()
 
-                for k, v in output.items():
-                    outputs[k].append(v.detach().cpu())
                 print(f'training {self.running_uuid} epoch:{epoch}/{self.cfg.epochs} '
-                      f'batch {i_batch}/{len(self.train_loader)} {float(loss):.3f}', end='\r')
+                      f'batch {i_batch}/{len(self.train_loader)} {loss}', end='\r')
                 print(json.dumps(dict(
                     type='train',
                     epoch=epoch,
@@ -168,19 +213,15 @@ class Trainer():
                     loss=float(loss),
                 )), file=self.training_log)
                 self.training_log.flush()
+                self.collect_result(output)
                 if self.cfg.debug and i_batch > 2:
                     break
             self.scheduler.step()
             torch.save(self.model.state_dict(), os.path.join(
                 self.logger_dir, f'model_{epoch:03d}.pth'))
             # calculate matrix training
-            collected = {}
-            for k, v in outputs.items():
-                if len(v[0].shape) == 0:
-                    collected[k] = torch.stack(v)
-                else:
-                    collected[k] = torch.cat(v)
-            metrix = self.matrix(epoch=self.epoch, data=collected)
+            metrix = self.matrix(epoch=self.epoch, data=self.merge_result())
+            print(metrix)
             metrix.update(dict(
                 type='train matrix',
                 epoch=self.epoch,
@@ -199,25 +240,18 @@ class Trainer():
     def test(self):
         self.model.eval()
         self.model.to(self.device)
-        outputs = defaultdict(list)
         with torch.no_grad():
-            for ibatch, data in enumerate(self.test_loader):
-                output = self.batch(epoch=self.epoch, ibatch=-1, data=data)
-                for k, v in output.items():
-                    outputs[k].append(v.detach().cpu())
+            for i_batch, data in enumerate(self.test_loader):
+                output = self.batch(epoch=self.epoch, i_batch=-1, data=data)
+                self.collect_result(output)
                 print(
                     f'testing{self.running_uuid} epoch:{self.epoch}/'
-                    f'{self.cfg.epochs} batch {ibatch}/{len(self.test_loader)}',
+                    f'{self.cfg.epochs} batch {i_batch}/{len(self.test_loader)}',
                     end=' \r')
-                if self.cfg.debug and ibatch > 2:
+                if self.cfg.debug and i_batch > 2:
                     break
-        collected = {}
-        for k, v in outputs.items():
-            if len(v[0].shape) == 0:
-                collected[k] = torch.stack(v)
-            else:
-                collected[k] = torch.cat(v)
-        metrix = self.matrix(epoch=self.epoch, data=collected)
+        merged_output = self.merge_result()
+        metrix = self.matrix(epoch=self.epoch, data=merged_output)
         metrix.update(dict(
             type='test matrix',
             epoch=self.epoch,
@@ -228,5 +262,5 @@ class Trainer():
         for k, v in metrix.items():
             print(f'{k}: {v}', end=' ')
         print()
-        pickle.dump(collected, open(os.path.join(
+        pickle.dump(merged_output, open(os.path.join(
             self.logger_dir, f'preds_{self.epoch}.pkl'), 'wb'))

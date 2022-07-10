@@ -58,7 +58,7 @@ class SurvivalDataset(ABC):
 
     def __len__(self):
         if self._testing:
-            return len(self.merged_data.accindex) - 1
+            return len(self.merged_data.array) // 2
         else:
             return len(self.merged_data.accindex) - 1
 
@@ -77,12 +77,12 @@ class SurvivalDataset(ABC):
         if the size of the dataset is odd, the last sample is duplicated
         """
         assert 0 <= index < len(self)
-        sample1 = index
-        sample2 = min(index + 1, len(self) - 1)
-        return [self.merged_data[1][sample1],
-                self.merged_data[1][sample2]]
+        sample1 = index * 2
+        sample2 = index * 2 + 1
+        return [self.merged_data.array[sample1],
+                self.merged_data.array[sample2]]
 
-    def _handle_paired_sample(self, sample_pair: List[Tuple[Sample, Sample]]):
+    def _handle_paired_sample(self, sample_pair: Tuple[Tuple[Sample, int], Tuple[Sample, int]]):
         """
         generate the trainable data for the model given a pair of samples
         """
