@@ -13,6 +13,6 @@ class SURELoss(nn.Module):
             dt = dt.view(-1, 1)
         # print(y1, code_1)
         cls = self.cls_loss(y1, code_1) + self.cls_loss(y2, code_2)
-        reg = self.reg_loss(y2 - y1, dt)
+        reg = self.reg_loss(y2 - y1, dt.repeat(1, y1.size(1)))
         loss = cls + self.gama * reg
         return loss
