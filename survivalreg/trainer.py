@@ -36,7 +36,7 @@ class Trainer():
     def __init__(self) -> None:
         print(self.__class__)
         tt = time.gmtime()
-        self.running_uuid = f'{tt.tm_year}_{tt.tm_mon:02d}_{tt.tm_mday:02d}-{tt.tm_hour:02d}_{tt.tm_min:02d}_{tt.tm_sec:02d}'
+        self.running_uuid = f'{tt.tm_year}{tt.tm_mon:02d}{tt.tm_mday:02d}_{tt.tm_hour:02d}{tt.tm_min:02d}{tt.tm_sec:02d}'
         print('running_uuid', self.running_uuid)
         print(self.cfg)
         self.epoch = None
@@ -58,16 +58,15 @@ class Trainer():
 
     @cached_property
     def logger_dir(self):
-        logger_dir = f'logs/{self.running_uuid}'
+        logger_dir = f'logs/{self.__class__.__name__}_{self.running_uuid}'
         if self.cfg.debug:
             logger_dir = f'logs/debug_{self.running_uuid}'
-            print(f'logger_dir: {logger_dir}')
         if not os.path.exists(logger_dir):
             os.makedirs(logger_dir)
-        if os.path.islink(f'logs/last'):
-            print('removing !!!')
-            os.remove('logs/last')
-        os.symlink(self.running_uuid, f'logs/last', )
+        last_link_dir = f'logs/{self.__class__.__name__}_last'
+        if os.path.islink(last_link_dir):
+            os.remove(last_link_dir)
+        os.symlink(f'{self.__class__.__name__}_{self.running_uuid}', last_link_dir)
         return logger_dir
 
     @cached_property
