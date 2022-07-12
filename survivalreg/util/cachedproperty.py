@@ -28,10 +28,19 @@ class CachedProperty:
                 f"({self.attrname!r} and {name!r})."
             )
 
+    def search_dep(self, klass, name):
+        if name in klass.__dict__:
+            return klass.__dict__[name]
+        for base in klass.__bases__:
+            res = self.search_dep(base, name)
+            if res is not None:
+                return res
+        return None
+
     def check_dependency(self, instance):
         for k, v in self.dependency.items():
-            if (instance.__class__.__dict__[k]).code_hash != v:
-                # print(f'function {k} changed')
+            inst = self.search_dep(instance.__class__, k)
+            if inst is None or inst.code_hash != v:
                 return False
         return True
 
