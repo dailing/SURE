@@ -1,11 +1,15 @@
 import inspect
+import logging
 import os
 import pickle
 from hashlib import md5
 from multiprocessing import RLock
+from  .logger import get_logger
+
+logger = get_logger(__name__, print_level=logging.WARN)
 
 _NOT_FOUND = object()
-
+logger.debug(__name__)
 
 class CachedProperty:
     def __init__(self, func):
@@ -38,11 +42,23 @@ class CachedProperty:
         return None
 
     def check_dependency(self, instance):
+        logger.debug(self.dependency)
         for k, v in self.dependency.items():
             inst = self.search_dep(instance.__class__, k)
             if inst is None or inst.code_hash != v:
                 return False
         return True
+
+    def report_dependency(self, instance):
+        logger.debug('reporting')
+        if '__cached_property_dep_stack' not in instance.__dict__:
+            return
+        if len(instance.__dict__['__cached_property_dep_stack']) > 0:
+            instance.__dict__['__cached_property_dep_stack'][-1].dependency.update(self.dependency)
+            instance.__dict__['__cached_property_dep_stack'][-1].dependency.update({
+                self.func.__name__: self.code_hash
+            })
+            logger.debug(f'appending {self.func.__name__} {self.code_hash}')
 
     def handle_cache_not_find(self, instance, owner=None):
         if not os.path.exists(self._cache_file):
@@ -58,15 +74,12 @@ class CachedProperty:
             if '__cached_property_dep_stack' not in instance.__dict__:
                 instance.__dict__['__cached_property_dep_stack'] = []
             instance.__dict__['__cached_property_dep_stack'].append(self)
+            logger.debug(f'before, {instance.__dict__["__cached_property_dep_stack"]}')
             val = self.func(instance)  # after this, the dependency map should be established
+            logger.debug(f'after, {instance.__dict__["__cached_property_dep_stack"]}')
             # update parent dependency if there is one
             assert instance.__dict__['__cached_property_dep_stack'].pop() is self
-
-            if len(instance.__dict__['__cached_property_dep_stack']) > 0:
-                instance.__dict__['__cached_property_dep_stack'][-1].dependency.update(self.dependency)
-                instance.__dict__['__cached_property_dep_stack'][-1].dependency.update({
-                    self.func.__name__:self.code_hash
-                })
+            self.report_dependency(instance)
             pickle.dump((val, self.dependency), open(self._cache_file, "wb"))
             return val
         val, self.dependency = pickle.load(open(self._cache_file, 'rb'))
@@ -74,17 +87,12 @@ class CachedProperty:
             return val
         # dependency changed, delete cache file and re_calculate
         os.remove(self._cache_file)
+        logger.debug('cache_dependency broke')
         return self.handle_cache_not_find(instance, owner)
 
     def __get__(self, instance, owner=None):
-        # print(f'enter {self.func.__name__}')
+        logger.debug(f'enter {self.func.__name__}')
         func = instance
-        if self._cache_file is None:
-            self._cache_folder = os.path.join(
-                './.output/',
-                inspect.getfile(instance.__class__).split('/')[-1],
-                func.__class__.__name__, self.func.__name__)
-            self._cache_file = os.path.join(self._cache_folder, self.code_hash)
 
         if instance is None:
             return self
@@ -92,7 +100,9 @@ class CachedProperty:
             raise TypeError(
                 "Cannot use cached_property instance without calling __set_name__ on it.")
         try:
-            cache = instance.__dict__
+            if '__cached_objs__' not in instance.__dict__:
+                instance.__dict__['__cached_objs__'] = {}
+            cache = instance.__dict__['__cached_objs__']
         # not all objects have __dict__ (e.g. class defines slots)
         except AttributeError:
             msg = (
@@ -103,6 +113,12 @@ class CachedProperty:
         val = cache.get(self.attrname, _NOT_FOUND)
         if val is _NOT_FOUND:
             with self.lock:
+                if self._cache_file is None:
+                    self._cache_folder = os.path.join(
+                        './.output/',
+                        inspect.getfile(instance.__class__).split('/')[-1],
+                        func.__class__.__name__, self.func.__name__)
+                    self._cache_file = os.path.join(self._cache_folder, self.code_hash)
                 # check if another thread filled cache while we awaited lock
                 val = cache.get(self.attrname, _NOT_FOUND)
                 if val is _NOT_FOUND:
@@ -116,5 +132,6 @@ class CachedProperty:
                             f"does not support item assignment for caching {self.attrname!r} property."
                         )
                         raise TypeError(msg) from None
-        # print(f'exit {self.func.__name__}')
+        self.report_dependency(instance)
+        logger.debug(f'exit {self.func.__name__}')
         return val
