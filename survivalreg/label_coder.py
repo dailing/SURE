@@ -4,6 +4,10 @@ from typing import List, Any
 import numpy as np
 import torch
 
+from .util.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class LabelCoderBaseClass(ABC):
     @abstractmethod
@@ -46,8 +50,8 @@ class BinaryLabelCoder(LabelCoderBaseClass):
             label = label > 0
 
         code = (label.to(torch.float32) - 0.5) * 2
-        if len(code.shape) == 1:
-            code = code.view(-1, 1)
+        # if len(code.shape) == 1:
+        #     code = code.view(-1, 1)
         return code
 
     def decode(self, code: List[bool]):
@@ -74,12 +78,15 @@ class LabelCoder:
     def __call__(self, *args, **kwargs):
         return self.code(*args, **kwargs)
 
-    def code(self, label) -> np.ndarray:
+    def code(self, label) -> torch.Tensor:
+        # logger.info(label)
         collection = []
         for name, coder in self.coders:
             assert name in label
             collection.append(coder.code(label[name]))
-        return torch.cat(collection)
+        res = torch.stack(collection, dim=1)
+        # logger.info(res.shape)
+        return res
 
     def decode(self, code: torch.Tensor) -> dict:
         assert isinstance(code, torch.Tensor) or isinstance(code, np.ndarray)
