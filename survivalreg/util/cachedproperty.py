@@ -4,12 +4,14 @@ import os
 import pickle
 from hashlib import md5
 from multiprocessing import RLock
-from  .logger import get_logger
+
+from .logger import get_logger
 
 logger = get_logger(__name__, print_level=logging.WARN)
 
 _NOT_FOUND = object()
 logger.debug(__name__)
+
 
 class CachedProperty:
     def __init__(self, func):
