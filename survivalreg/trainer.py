@@ -43,6 +43,7 @@ class Trainer():
         if isinstance(self.label_coder, type):
             self.label_coder = self.label_coder()
         self._result_cache = None
+        self._pretrain_loaded = False
 
     def _get_cfg_recursive(self, cls=None):
         if cls is None:
@@ -80,11 +81,15 @@ class Trainer():
         model = ModelProgression(
             backbone=self.cfg.model,
             output_size=len(self.label_coder))
+
+    def load_pretrain(self):
+        if self._pretrain_loaded:
+            return
         if self.cfg.load_pretrain:
             print(f'load pretrain: {self.cfg.load_pretrain}')
-            model.load_state_dict(torch.load(
-                self.cfg.load_pretrain, map_location='cpu'))
-        return model
+            print(self.model.load_state_dict(torch.load(
+                self.cfg.load_pretrain, map_location='cpu')))
+        self._pretrain_loaded = True
 
     @cached_property
     def train_dataset(self) -> Dataset:
@@ -189,6 +194,7 @@ class Trainer():
         return collected
 
     def train(self):
+        self.load_pretrain()
         print(self.cfg, file=self.training_log)
         print(self.scheduler)
         print(self.optimizer)
@@ -237,6 +243,7 @@ class Trainer():
                 break
 
     def test(self):
+        self.load_pretrain()
         self.model.eval()
         self.model.to(self.device)
         with torch.no_grad():
