@@ -81,6 +81,7 @@ class Trainer():
         model = ModelProgression(
             backbone=self.cfg.model,
             output_size=len(self.label_coder))
+        return model
 
     def load_pretrain(self):
         if self._pretrain_loaded:
