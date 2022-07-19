@@ -42,7 +42,7 @@ class Trainer():
         self.epoch = None
         if isinstance(self.label_coder, type):
             self.label_coder = self.label_coder()
-        self._result_cache = None
+        self._result_cache:defaultdict = None
         self._pretrain_loaded = False
 
     def _get_cfg_recursive(self, cls=None):
@@ -192,6 +192,7 @@ class Trainer():
                 collected[k] = torch.stack(v)
             else:
                 collected[k] = torch.cat(v)
+        self._result_cache.clear()
         return collected
 
     def train(self):
