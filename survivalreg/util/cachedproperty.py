@@ -2,6 +2,7 @@ import inspect
 import logging
 import os
 import pickle
+from functools import partial
 from hashlib import md5
 from multiprocessing import RLock
 
@@ -13,7 +14,47 @@ _NOT_FOUND = object()
 logger.debug(__name__)
 
 
+class CacheDependency:
+    """
+    Used to monitor changed of a member function. if the code changes, all
+    CachedPropertied will be invalidated and re-calculated
+    """
+
+    def __init__(self, func):
+        self.func = func
+        self.attrname = None
+        self.__doc__ = func.__doc__
+        self.code_hash = md5(inspect.getsource(
+            func).encode("utf-8")).hexdigest()
+        self.lock = RLock()
+        self._cache_folder = None
+        self._cache_file = None
+        self.dependency = {}  # dependency is a name:func_hash map
+
+    def report_dependency(self, instance):
+        logger.debug('reporting')
+        if '__cached_property_dep_stack' not in instance.__dict__:
+            return
+        if len(instance.__dict__['__cached_property_dep_stack']) > 0:
+            instance.__dict__['__cached_property_dep_stack'][-1].dependency.update(self.dependency)
+            instance.__dict__['__cached_property_dep_stack'][-1].dependency.update({
+                self.func.__name__: self.code_hash
+            })
+            logger.debug(f'appending {self.func.__name__} {self.code_hash}')
+
+    def __get__(self, instance, owner):
+        self.report_dependency(instance)
+        return partial(self.func, instance)
+
+
 class CachedProperty:
+    """
+    Cache the result of a member-function, act like a normal
+    cached_property, but it saves changes to disk. When re-run
+    the script, the data cached to local disk will be loaded to
+    reduce time.
+    """
+
     def __init__(self, func):
         self.func = func
         self.attrname = None

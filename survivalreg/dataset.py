@@ -4,12 +4,14 @@ from functools import cached_property
 from random import Random
 from typing import List, Tuple
 
+from torch.utils.data import Dataset
+
 Sample = namedtuple('Sample', ['sid', 'time', 'label'])
 
 merged_data = namedtuple('merged_data', ['accindex', 'array'])
 
 
-class SurvivalDataset(ABC):
+class SurvivalDataset(ABC, Dataset):
     def __init__(self, testing=False, sample_seed=None) -> None:
         super().__init__()
         self._testing = testing

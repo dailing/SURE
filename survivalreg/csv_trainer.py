@@ -6,7 +6,6 @@ import cv2
 import pandas as pd
 
 from .dataset import SurvivalDataset, Sample
-from .trainer import Trainer
 
 
 class CSVSurvivalDataset(SurvivalDataset):
@@ -82,5 +81,3 @@ class CSVSurvivalDataset(SurvivalDataset):
         if isinstance(self.filename, pd.DataFrame):
             return self.filename
         return pd.read_csv(self.filename)
-
-
